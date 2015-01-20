@@ -1,0 +1,15 @@
+<?php
+/**
+ * TeachersTV Unit tests, using SimpleTest.
+ *
+ * Not a lot to see here yet, will build out when I have time.
+ */
+
+class TeachersTVDatabaseTestCase extends DrupalWebTestCase {
+
+  function SetUp() {
+    // Create the module's tables without running hook_install or hook_enable
+    drupal_install_schema('teacherstv');
+  }
+
+}

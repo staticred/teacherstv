@@ -1,0 +1,20 @@
+; $Id:$
+name = TeachersTV
+description = "This module connects to the TeachersTV video streaming service."
+core = 7.x
+package = Media
+version = 7.x-1.0-dev
+
+dependencies[] = field_ui
+dependencies[] = content_migrate
+
+files[] = teacherstv.module
+files[] = teacherstv.admin.inc
+files[] = teacherstv.widget.inc
+files[] = teacherstv.test
+files[] = includes/coreapi.php
+files[] = includes/CURL.php
+files[] = includes/functions.php
+files[] = views/teacherstv_field_views_video_handler.inc
+
+configure = admin/config/media/teacherstv

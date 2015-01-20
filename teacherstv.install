@@ -1,0 +1,355 @@
+<?php
+// Implements hook_install().
+function teacherstv_install() {
+  // check to see if there is existing data
+
+  if (teacherstv_needs_upgrade()) {
+    teacherstv_db_migrate_videos();
+    teacherstv_db_migrate_categories();
+    teacherstv_db_migrate_catvids();
+  }
+
+}
+
+// Implements hook_uninstall().
+/*
+function teacherstv_uninstall() {
+
+}
+*/
+// Implements hook_field_scheme().
+
+function teacherstv_field_schema($field) {
+  switch ($field['type']) {
+    case 'teacherstv_video':
+      $columns = array(
+        'title' => array(
+          'type' => 'varchar',
+          'length' => '255',
+          'not null' => FALSE,
+        ),
+        'category' => array(
+          'type' => 'varchar',
+          'length' => '64',
+          'not null' => FALSE,
+        ),
+        'exclude_title' => array(
+          'type' => 'varchar',
+          'length' => 1,
+          'not null' => FALSE,
+        ),
+        'videoid' => array(
+          'type' => 'varchar',
+          'length' => '64',
+          'not null' => FALSE,
+        ),
+      );
+
+      $indexes = array(
+        'videoid' => array('videoid'),
+      );
+    break;
+
+  }
+  return array(
+    'columns' => $columns,
+    'indexes' => $indexes,
+  );
+
+}
+
+function teacherstv_schema() {
+  $schema['teacherstv_category'] = array(
+    'description' => 'Stores list of categories from Core Catalyst API',
+    'fields' => array(
+      'id' => array(
+        'description' => 'primary key.',
+        'type' => 'int',
+        'not null' => TRUE,
+        'auto_increment' => TRUE,
+      ),
+      'category' => array(
+        'description' => 'Category name.',
+        'type' => 'varchar',
+        'length' => 128,
+        'not null' => FALSE,
+      ),
+    ),
+    'primary key' => array('id'),
+  );
+
+  $schema['teacherstv_video'] = array(
+    'description' => 'List of videos for a specific category',
+    'fields' => array(
+      'id' => array(
+        'description' => 'Unique identifier',
+        'type' => 'int',
+        'not null' => TRUE,
+        'auto_increment' => TRUE,
+      ),
+      'video_id' => array(
+        'description' => 'Core Catalyst Video ID',
+        'type' => 'int',
+        'not null' => TRUE,
+      ),
+      'title' => array(
+        'description' => 'Video title on Core Catalyst',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => FALSE,
+      ),
+      'video_url' => array(
+        'description' => 'Core Catalyst Video URL',
+        'type' => 'varchar',
+        'length' => 255,
+        'not null' => FALSE,
+      ),
+      'published_date' => array(
+        'description' => 'Date of publication',
+        'type' => 'int',
+      ),
+      'created' => array(
+        'description' => 'Date of creation',
+        'type' => 'int',
+      ),
+      'modified' => array(
+        'description' => 'Last modified date',
+        'type' => 'int',
+      ),
+      'status' => array(
+        'description' => 'Status of video record in API',
+        'type' => 'int',
+      ),
+      'video_status' => array(
+        'description' => 'Status of video format',
+        'type' => 'int',
+      ),
+      'download' => array(
+        'description' => 'Download status of video',
+        'type' => 'int',
+      ),
+      'embed' => array(
+        'description' => 'Embed status of video',
+        'type' => 'int',
+      ),
+      'description' => array(
+        'description' => 'Textual description of video in API',
+        'type' => 'text',
+      ),
+      'screenshot' => array(
+        'description' => 'URL for the video screen capture',
+        'type' => 'varchar',
+        'length' => 255,
+      ),
+      'access_key' => array(
+        'description' => 'Video Access Key',
+        'type' => 'varchar',
+        'length' => 64,
+      ),
+      'cron_lastupdate' => array(
+        'description' => 'Last time data was updated from the API',
+        'type' => 'int',
+      ),
+    ),
+    'primary key' => array('id'),
+  );
+
+  $schema['teacherstv_category_videos'] = array(
+    'description' => 'Stores details on individual videos.',
+    'fields' => array(
+      'id' => array(
+        'type' => 'int',
+        'auto_increment' => TRUE,
+        'not null' => TRUE,
+      ),
+      'categoryid' => array(
+        'description' => 'Category associated with this video',
+        'type' => 'int',
+        'not null' => TRUE,
+      ),
+      'videoid' => array(
+        'description' => 'Video associated with this category',
+        'type' => 'int',
+        'not null' => TRUE,
+      ),
+    ),
+    'primary key' => array('id'),
+  );
+
+ return $schema;
+
+}
+/**
+  * Helper function to migrate videos from corevideofield DB
+  */
+function teacherstv_db_migrate_videos() {
+  // Get a list of all videos in the old database;
+  $videos = db_select('corevideofield_video', 'cvf')
+    ->fields('cvf', array(
+        'id',
+        'video_id',
+        'title',
+        'video_url',
+        'published_date',
+        'created',
+        'modified',
+        'status',
+        'video_status',
+        'download',
+        'embed',
+        'description',
+        'screenshot',
+        'access_key',
+        'cron_lastupdate',
+      ))
+    ->execute()
+    ->fetchAll();
+
+  // Now we have the old database values.  Let's move them into the new database tables.
+
+    $query = db_insert('teacherstv_video')
+      ->fields(array(
+          'id',
+        'video_id',
+        'title',
+        'video_url',
+        'published_date',
+        'created',
+        'modified',
+        'status',
+        'video_status',
+        'download',
+        'embed',
+        'description',
+        'screenshot',
+        'access_key',
+        'cron_lastupdate',
+      ));
+
+  foreach ($videos as $video) {
+    // Should we build in logic to check whether the entry already exists? Probably.
+
+    // Add the video to the insert query.
+    $query->values(array(
+      $video->id,
+      $video->video_id,
+      $video->title,
+      $video->video_url,
+      $video->published_date,
+      $video->created,
+      $video->modified,
+      $video->status,
+      $video->video_status,
+      $video->download,
+      $video->embed,
+      $video->description,
+      $video->screenshot,
+      $video->access_key,
+      $video->cron_lastupdate,
+    ));
+  }
+
+  // Execute the query.
+  $query->execute();
+}
+
+/**
+  * Helper function to migrate categories from corevideofield DB
+  */
+function teacherstv_db_migrate_categories() {
+  // Get a list of all categories in the database
+  $categories = db_select('corevideofield_category','cvc')
+    ->fields('cvc', array(
+      'id',
+      'category',
+    ))
+    ->execute()
+    ->fetchAll();
+
+  // Set up the insert query.
+  $query = sb_insert('teacherstv_category')
+    ->fields(array(
+      'id',
+      'category',
+      ));
+
+  foreach ($categories as $category) {
+
+    // Should we build in logic to check whether the entry already exists? Probably.
+
+    // Add the category to the insert query
+    $query->values(array(
+      $category->id,
+      $category->category,
+    ));
+  }
+
+  // Execute the query.
+  $query->execute();
+
+}
+
+/**
+  * Helper function to migrate video category associations from corevideofield DB
+  */
+
+function teacherstv_db_migrate_catvids() {
+  // Get a list of category video associations from the old database.
+
+  $catvids = db_select('corevideofield_category_videos','cvcv')
+    ->fields('cvcv', array(
+      'id',
+      'categoryid',
+      'videooid',
+    ))
+    ->execute()
+    ->fetchAll();
+
+  // Set up the insert query.
+
+  $query = db_insert('teacherstv_category_videos')
+    ->fields(array(
+      'id',
+      'categoryid',
+      'videoid',
+    ));
+
+
+  foreach ($catvids as $catvid) {
+
+    // Should we build in logic to check whether the entry already exists? Probably.
+
+    // Add the category video association to the query.
+    $query->values(array(
+      $catvid->id,
+      $catvid->categoryid,
+      $catvid->videoid,
+    ));
+
+  }
+
+}
+
+function teacherstv_needs_upgrade() {
+
+  // Check to see if the corevidoefield_video table exists
+  $videos_exist = db_table_exists('corevideofield_video');
+
+  // If it does, let's see if there's any data to migrate
+  if ($videos_exist) {
+    // Check to see if there is any data in the table
+    $result = db_select('corevideofield_video', 'cvf')
+      ->fields('cvf', array('id'))
+      ->execute()
+      ->fetchAll();
+
+    // If there's data, we'll get results! Otherwise, an empty set.
+    if (sizeof($result) > 0) {
+      return TRUE;
+    } else {
+      return FALSE;
+    }
+
+  }
+  return FALSE;
+}

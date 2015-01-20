@@ -1,0 +1,486 @@
+<?php
+/**
+  * TeachersTV Module.
+  *
+  * This module gives the ability to pull video data from the TeachersTV service
+  *
+  */
+
+// Grab the coreapi library and core functions library
+require_once("includes/coreapi.php");
+require_once("includes/functions.php");
+
+
+/**
+ * Implements hook_memu()
+ */
+function teacherstv_menu() {
+
+
+  $items['admin/config/media/teacherstv'] = array(
+    'title' => 'TeachersTV',
+    'description' => 'Configure TeachersTV video streaming.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('teacherstv_settings_form'),
+    'access arguments' => array('teacherstv_admin'),
+    'file' => 'teacherstv.admin.inc',
+  );
+
+  $items['admin/config/media/teacherstv/default'] = array(
+    'title' => t('TeachersTV'),
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+  );
+
+  // path for upgrade screen
+  $items['admin/config/media/teacherstv/migrate'] = array(
+    'title' => t('Migration'),
+    'description' => t('Migrate corevideofield data from Drupal 6'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('teacherstv_upgrade_form'),
+    'access arguments' => array('teacherstv_admin'),
+    'file' => 'teacherstv.admin.inc',
+    'type' => MENU_LOCAL_TASK,
+    'weight' => '3',
+  );
+
+  $items['admin/config/media/teacherstv/migrate/process'] = array(
+    'page callback' => 'teacherstv_upgrade',
+    'access arguments' => array('teacherstv_admin'),
+    'file' => 'teacherstv.admin.inc',
+  );
+
+  /* Cron debug menu items */
+    $items['teacherstv/cron/cats'] = array(
+        'page callback' => 'teacherstv_check_category_list',
+        'access arguments' => array('teacherstv_admin'),
+        'type' => MENU_NORMAL_ITEM,
+    );
+
+    $items['teacherstv/cron/catlist'] = array(
+        'page callback' => 'teacherstv_cron_check_catvids',
+        'access arguments' => array('teacherstv_admin'),
+        'type' => MENU_NORMAL_ITEM,
+    );
+
+    $items['teacherstv/cron/vidlist'] = array(
+        'page callback' => 'teacherstv_cron_check_video_list',
+        'access arguments' => array('teacherstv_admin'),
+        'type' => MENU_NORMAL_ITEM,
+    );
+    
+    $items['teacherstv/cron/checkstatus'] = array(
+        'page callback' => 'teacherstv_check_db_status',
+        'access arguments' => array('teacherstv_admin'),
+        'type' => MENU_NORMAL_ITEM,
+    );
+  
+
+  return $items;
+}
+
+/**
+ * Implements hook_permission()
+ */
+function teacherstv_permission() {
+  return array(
+    'teacherstv_admin' => array(
+      'title' => t('Administer TeachersTV'),
+      'description' => t('Configure the TeachersTV API'),
+    ),
+    'teacherstv_add_content' => array(
+      'title' => t('Add TeachersTV content'),
+      'description' => t('This gives the specified group the ability to add TeachersTV content to a content node.'),
+    ),
+    'teacherstv_delete_content' => array(
+      'title' => t('Delete TeachersTV content'),
+      'description' => t('This gives the specified group the ability to delete TeachersTV content from a content node.'),
+    ),
+    'teacherstv_view' => array(
+      'title' => t('View TeachersTV Content'),
+      'description' => t('This gives the specified group the ability to view TeachersTV content'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_field_info()
+ */
+function teacherstv_field_info() {
+  return array(
+    'teacherstv_video' => array(
+      'label' => t('Associated video'),
+      'description' => t('TeachersTV embedded video.'),
+      'default_widget' => 'teacherstv_video',
+      'default_formatter' => 'teacherstv_default',
+    ),
+  );
+}
+
+/**
+ * Implements hook_field_is_empty()
+ */
+function teacherstv_field_is_empty($item, $field) {
+
+  if ($field['type'] == 'teacherstv_video') {
+    if (empty($item['videoid']) && !$item['videoid'] === 0 ) {
+      return TRUE;
+    }
+  }
+  return FALSE;
+
+}
+
+/**
+* Implementation of hook_field_settings_form().
+*/
+function teacherstv_field_settings_form($field, $instance, $has_data) {
+  if ($field['type'] == 'teacherstv_video') {
+    $settings = $field['settings'];
+    $form = array();
+    return $form;
+  }
+}
+
+/**
+ * Implements hook_field_widget_info()
+ */
+function teacherstv_field_widget_info() {
+  return array(
+    'teacherstv_video' => array(
+      'label' => t('TeachersTV Video'),
+      'field types' => array('teacherstv_video'),
+      'behaviours' => array(
+        'multiple values' => FALSE,
+        'default value' =>  'FIELD_BEHAVIOUR_DEFAULT',
+      ),
+    ),
+  );
+
+}
+
+/**
+ * Implements hook_field_widget_form()
+ */
+function teacherstv_field_widget_form(&$form, &$form_state, $field, $instance, $langcode, $items, $delta, $element) {
+  require_once('teacherstv.widget.inc');
+
+  $widget = $element;
+  $widget['#delta'] = $delta;
+  $settings = $items;
+
+  switch($instance['widget']['type']) {
+
+  case 'teacherstv_video':
+
+    /**
+      * We need two basic fields for the form:
+      *  - A title for the video
+      *  - A selected video
+      */
+
+    $widget['title'] = array(
+      '#type' => 'textfield',
+      '#title' => t('Title'),
+      '#delta' => $delta,
+      '#default_value' => isset($items[$delta]['title']) ? $items[$delta]['title'] : NULL,
+    );
+    $widget['exclude_title'] = array(
+      '#type' => 'checkbox',
+      '#title' => t('Exclude title from display'),
+      '#delta' => $delta,
+      '#default_value' => isset($items[$delta]['exclude_title']) ? $items[$delta]['exclude_title'] : FALSE,
+    );
+
+    $cat_options = teacherstv_widget_form_get_categories();
+
+    if (isset($form_state['values'][$field['field_name']][$langcode][$delta]['category'])) {
+     $selected = isset($form_state['values'][$field['field_name']][$langcode][$delta]['category']) ? $form_state['values'][$field['field_name']][$langcode][$delta]['category'] : key($cat_options);
+    } else {
+      $selected = isset($items[0]['category']) ? $items[0]['category'] : key($cat_options);
+    }
+    // Need to store widget data in $form_state for access in callback
+    $field_data = array(
+      'field_name' => $field['field_name'],
+      'langcode' => $langcode,
+      'delta' => $delta,
+    );
+    $form_state['video_id']['field_data'] = $field_data;
+
+
+    $widget['category'] = array(
+      '#type' => 'select',
+      '#title' => t('Video category'),
+      '#default_value' => isset($items[$delta]['category']) ? $items[$delta]['category'] : $selected,
+      '#options' => $cat_options,
+      '#attributes' => array('class' => array('enabled-for-ajax')),
+      '#attributes' => array('readonly' => 'readonly'),
+      '#ajax' => array(
+        'event' => 'change',
+        'wrapper' => 'replace_video_' . $field['field_name'] . '_' . $delta,
+        'callback' => 'teacherstv_ajax_callback',
+        'method' => 'replace',
+      ),
+    );
+
+    if ($selected == 0) {
+      $vidlabel = '';
+    } else {
+      $vidlabel = $cat_options[$selected];
+    }
+      $widget['videoid'] = array(
+      '#type' => 'select',
+      '#title' => t($vidlabel . ' Video'),
+      '#delta' => $delta,
+      '#default_value' => isset($items[$delta]['videoid']) ? (int)$items[$delta]['videoid'] : NULL,
+      '#options' => teacherstv_widget_form_get_videos($selected),
+      '#prefix' => '<div id="replace_video_' . $field['field_name'] . '_' . $delta . '">',
+      '#suffix' => '</div>',
+    );
+
+/*
+    $widget['teacherstv_remove'] = array(
+      '#type' => 'button',
+      '#title' => t('Remove'),
+      '#delta' => $delta,
+      '#length' => 35,
+      '#ajax' => array(
+        'callback' => 'teacherstv_ajax_remove_callback',
+        'event' => 'click',
+        'wrapper' => 'teacherstv_field_' . $delta,
+        'method' => 'replace',
+      ),
+    );
+*/
+
+    // Build embeddable video from video ID & URL
+  break;
+
+
+  }
+
+  return $widget;
+}
+
+/**
+ * Implements hook_field_presave()
+ */
+function teacherstv_field_presave($entity_type, $entity, $field, $instance, $langcode, &$items) {
+
+  foreach ($items as $delta => $item) {
+    if (isset($item['teacherstv']['videoid']) && $item['teacherstv']['videoid'] == 0) {
+      $items[$delta]['category'] = NULL;
+      $items[$delta]['title'] = NULL;
+      $items[$delta]['exclude_title'] = NULL;
+      continue;
+    }
+
+    if (isset($item['teacherstv']['title'])) {
+      $items[$delta]['title'] = $item['teacherstv']['title'];
+    }
+    if (isset($item['teacherstv']['exclude_title'])) {
+      $items[$delta]['exclude_title'] = $item['teacherstv']['exclude_title'];
+    }
+    if (isset($item['teacherstv']['category'])) {
+      $items[$delta]['category'] = $item['teacherstv']['category'];
+    }
+    if (isset($item['teacherstv']['videoid'])) {
+      $items[$delta]['videoid'] = $item['teacherstv']['videoid'];
+    }
+  }
+
+}
+
+/**
+ * Implements hook_field_attach_submit()
+ */
+function teacherstv_field_attach_submit($entity_type, $entity, $form, &$form_state) {
+
+}
+
+
+/**
+ * Implements hook_field_formatter_info()
+ */
+function teacherstv_field_formatter_info() {
+
+  return array(
+    'teacherstv_default' => array(
+      'label' => t('Default'),
+      'field types' => array('teacherstv_video'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_field_formatter_view()
+ */
+function teacherstv_field_formatter_view($entity_type, $entity, $field, $instance, $langcode, $items, $display) {
+  $element = array();
+      switch($display['type']) {
+    case 'teacherstv_default':
+      foreach($items as $delta => $item) {
+        $element[$delta]['#markup'] = theme('teacherstv_formatter_default', $item);
+      }
+    break;
+  }
+
+  return $element;
+}
+
+/**
+ * Implements hook_theme()
+ */
+function teacherstv_theme($existing, $type, $theme, $path) {
+  return array(
+    'teacherstv_formatter_default' => array(
+      'variables' => array('item' => NULL),
+    ),
+  );
+}
+
+/**
+ * The default formatter. Called from teacherstv_field_formatter_view
+ */
+function theme_teacherstv_formatter_default($item) {
+
+    $videoid = $item['videoid'];
+    $categoryid = $item['category'];
+    $title = $item['title'];
+
+  $output = "";
+
+  if (!$videoid == 0) {
+
+    $video = teacherstv_get_video($videoid);
+
+    if ($title == "") {
+      $title = $video->title;
+    }
+
+    $output .= '<div class="teacherstv_video_embed_' . $videoid . '">';
+    if (isset($item['exclude_title']) && !$item['exclude_title']) {
+    $output .= "$title";
+    }
+
+    //  $video = teacherstv_get_video($videoid);
+
+    $embed_html = teacherstv_render_video($videoid);
+    $output .= $embed_html;
+
+
+    $output .= "</div>";
+  }
+
+  return $output;
+}
+
+
+/**
+ * Implements hook_content_migrate_field_alter().
+ *
+ * Use this to tweak the conversion of field settings from the D6 style to the
+ * D7 style for specific situations not handled by basic conversion, as when
+ * field types or settings are changed.
+ *
+ * $field_value['widget_type'] is available to
+ * see what widget type was originally used.
+ */
+
+function teacherstv_content_migrate_field_alter(&$field_value, $instance_value) {
+  switch ($field_value['module']) {
+
+    case 'corevideofield':
+      $field_value['module'] = 'teacherstv';
+      $field_value['type'] = 'teacherstv_video';
+
+      break;
+  }
+}
+
+
+/**
+ * Implements hook_content_migrate_instance_alter().
+ *
+ * Use this to tweak the conversion of instance or widget settings from the D6
+ * style to the D7 style for specific situations not handled by basic
+ * conversion, as when formatter or widget names or settings are changed.
+ */
+function teacherstv_content_migrate_instance_alter(&$instance_value, $field_value) {
+
+  switch ($field_value['type']) {
+    case 'corevideofield':
+      foreach($instance_value['display'] as $context => $settings) {
+        switch($settings['type']) {
+          case 'full':
+          case 'teaser':
+            $instance_value['display'][$context]['type'] = 'teacherstv';
+            $instance_value['display'][$context]['settings']['teacherstv_view_mode'] = $settings['type'];
+            break;
+
+          default:
+            $instance_value['display'][$context]['type'] = 'teacherstv_' . $settings['type'];
+            break;
+        }
+      break;
+    }
+    switch ($instance_value['widget']['type']) {
+      case 'corevideofield':
+        $instance_value['widget']['type'] = 'teacherstv_video';
+        $instance_value['widget']['module'] = 'teacherstv';
+        break;
+    }
+    break;
+
+  }
+}
+
+/**
+ * Implements hook_content_migrate_data_record_alter().
+ *
+ * Tweaks individual records in a field.
+ */
+function teacherstv_content_migrate_data_record_alter(&$record, $field, $instance) {
+
+  switch ($field['type']) {
+
+    case 'teacherstv_video':
+
+      // Import the video ID
+      if (!empty($record[$field['field_name'] . '_corevideo_uid']) && ($data = $record[$field['field_name'] . '_corevideo_uid'])) {
+        $record[$field['field_name'] . '_videoid'] = $data;
+      } else {
+        unset($record[$field['field_name'] . '_corevideo_uid']);
+      }
+
+      // Import the video's category
+      if (!empty($record[$field['field_name'] . '_corevideo_category']) && ($data = $record[$field['field_name'] . '_corevideo_category'])) {
+        $record[$field['field_name'] . '_category'] = $data;
+      } else {
+        unset($record[$field['field_name'] . '_corevideo_category']);
+      }
+
+      // Import the video's title, if any.  Otherwise, unset it.
+      if (!empty($record[$field['field_name'] . '_corevideo_title']) && ($data = $record[$field['field_name'] . '_corevideo_title'])) {
+        $record[$field['field_name'] . '_title'] = $data;
+      } else {
+        unset($record[$field['field_name'] . '_corevideo_title']);
+      }
+
+      // Set Exclude Title to FALSE
+      $record[$field['field_name'] . '_exclude_title'] = 0;
+
+      break;
+
+  }
+
+}
+
+/**
+ * Implements hook_views_api().
+ */
+function teacherstv_views_api() {
+  return array(
+    'api' => 3,
+    'path' => drupal_get_path('module', 'teacherstv') . "/views",
+  );
+}
