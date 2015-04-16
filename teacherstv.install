@@ -7,6 +7,7 @@ function teacherstv_install() {
     teacherstv_db_migrate_videos();
     teacherstv_db_migrate_categories();
     teacherstv_db_migrate_catvids();
+    teacherstv_db_delete_corevideofield_tables();
   }
 
 }
@@ -258,31 +259,40 @@ function teacherstv_db_migrate_videos() {
   */
 function teacherstv_db_migrate_categories() {
   // Get a list of all categories in the database
-  $categories = db_select('corevideofield_category','cvc')
-    ->fields('cvc', array(
-      'id',
-      'category',
-    ))
-    ->execute()
-    ->fetchAll();
-
-  // Set up the insert query.
-  $query = sb_insert('teacherstv_category')
-    ->fields(array(
-      'id',
-      'category',
+  if (db_table_exists('corevideofield_category')) {
+    $categories = db_select('corevideofield_category','cvc')
+      ->fields('cvc', array(
+        'id',
+        'category',
+      ))
+      ->execute()
+      ->fetchAll();
+    // Set up the insert query.
+    $query = db_insert('teacherstv_category')
+      ->fields(array(
+        'id',
+        'category',
+        ));
+  
+    foreach ($categories as $category) {
+  
+      // Should we build in logic to check whether the entry already exists? Probably.
+  
+      // Add the category to the insert query
+      $query->values(array(
+        $category->id,
+        $category->category,
       ));
+    }
 
-  foreach ($categories as $category) {
-
-    // Should we build in logic to check whether the entry already exists? Probably.
-
-    // Add the category to the insert query
-    $query->values(array(
-      $category->id,
-      $category->category,
-    ));
+  } else {
+    $query = db_insert('teacherstv_category')
+      ->fields(array(
+        'id',
+        'category',
+        ));
   }
+
 
   // Execute the query.
   $query->execute();
@@ -327,8 +337,24 @@ function teacherstv_db_migrate_catvids() {
     ));
 
   }
-
 }
+
+function teacherstv_db_delete_corevideofield_tables() {
+  
+    $tables = array(
+      'corevideofield_category',
+      'corevideofield_category_videos',
+      'corevideofield_videos',
+      );
+    
+    foreach ($tables as $table) {
+      if (db_table_exists($table)) {
+        db_drop_table($table);
+      }
+    } 
+  
+  }
+
 
 function teacherstv_needs_upgrade() {
 

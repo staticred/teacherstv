@@ -149,7 +149,7 @@ function teacherstv_field_widget_info() {
     'teacherstv_video' => array(
       'label' => t('TeachersTV Video'),
       'field types' => array('teacherstv_video'),
-      'behaviours' => array(
+      'behaviors' => array(
         'multiple values' => FALSE,
         'default value' =>  'FIELD_BEHAVIOUR_DEFAULT',
       ),

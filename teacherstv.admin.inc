@@ -10,10 +10,6 @@
  */
 function teacherstv_settings_form($form, &$form_state) {
 
-  // TODO: Build in logic to detect if old tables exist, and show upgrade message
-  // if they do.
-
-
   $form['teacherstv_api'] = array(
     '#type' => 'fieldset',
     '#title' => t('Teachers TV API'),
